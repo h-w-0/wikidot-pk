@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户分数对比</title>
+    <style>
+        .stat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 10px;
+        }
+        
+        .user-headers {
+            display: flex;
+            gap: 10px;
+            padding: 8px;
+            font-weight: bold;
+        }
+        
+        .user-header {
+            flex: 1;
+            padding: 6px;
+            text-align: center;
+            border-bottom: 2px solid #ccc;
+        }
+        
+        .label-column {
+            min-width: 80px;
+            font-weight: bold;
+        }
+        
+        .stat-item {
+            display: flex;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        
+        .value-box {
+            flex: 1;
+            padding: 6px;
+            border-radius: 3px;
+            text-align: center;
+        }
+
+        .higher {
+            background-color: rgba(76, 175, 80, 0.3);
+            font-size:200%;
+        }
+        
+        .lower {
+            background-color: rgba(220, 53, 69, 0.3);
+        }
+        
+        .equal {
+            background-color: rgba(76, 175, 80, 0.3);
+        }
+        
+        .input-section {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            align-items: center;
+        }
+        
+        input {
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            flex: 1;
+        }
+        
+        button {
+            padding: 6px 12px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        .loading, .error {
+            color: #666;
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading" class="loading">加载中...</div>
+    <div id="error" class="error" style="display: none;"></div>
+    
+    <div id="stats" style="display: none;">
+        <!-- 用户标题行 -->
+        <div class="user-headers">
+            <div class="label-column"></div>
+            <div id="user1Header" class="user-header"></div>
+            <div id="user2Header" class="user-header"></div>
+        </div>
+        
+        <!-- 统计数据容器 -->
+        <div class="stat-container"></div>
+    </div>
+    
+    <div class="input-section">
+        <input type="text" id="user1" placeholder="输入第一个用户名">
+        <input type="text" id="user2" placeholder="输入第二个用户名">
+        <button id="compareBtn">对比</button>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const defaultUser1 = urlParams.get('user1') || 'H_W';
+        const defaultUser2 = urlParams.get('viewer') || 'H_W';
+        
+        document.getElementById('user1').value = defaultUser1;
+        document.getElementById('user2').value = defaultUser2;
+        
+        document.getElementById('compareBtn').addEventListener('click', () => {
+            const user1 = document.getElementById('user1').value.trim();
+            const user2 = document.getElementById('user2').value.trim();
+            
+            if (!user1 || !user2) {
+                showError('请输入两个用户名');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+            
+            fetchUserStats(user1, user2);
+        });
+
+        fetchUserStats(defaultUser1, defaultUser2);
+        
+        function fetchUserStats(user1, user2) {
+            const query = `
+                query GetUserStats($user1: String!, $user2: String!) {
+                    user1: user(name: $user1) {
+                        name
+                        statistics {
+                            rank
+                            totalRating
+                            meanRating
+                            pageCount
+                        }
+                    }
+                    user2: user(name: $user2) {
+                        name
+                        statistics {
+                            rank
+                            totalRating
+                            meanRating
+                            pageCount
+                        }
+                    }
+                }
+            `;
+            
+            fetch('https://apiv1.crom.avn.sh/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query,
+                    variables: { user1, user2 }
+                })
+            })
+            .then(res => res.ok ? res.json() : Promise.reject('接口响应错误'))
+            .then(data => {
+                if (data.errors) throw new Error(data.errors[0].message);
+                
+                const [userA, userB] = [data.data.user1, data.data.user2];
+                if (!userA || !userB || !userA.statistics || !userB.statistics) {
+                    throw new Error('用户数据不完整或用户不存在');
+                }
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('stats').style.display = 'block';
+                
+                updateStats(userA, userB);
+            })
+            .catch(err => {
+                showError(err.message);
+            });
+        }
+        
+        function updateStats(userA, userB) {
+            document.getElementById('user1Header').textContent = userA.name;
+            document.getElementById('user2Header').textContent = userB.name;
+            
+            const statsContainer = document.querySelector('.stat-container');
+            statsContainer.innerHTML = ''; // 清空现有内容
+            
+            const statsToCompare = [
+                { 
+                    label: '排名', 
+                    key: 'rank',
+                    compare: (a, b) => a < b ? 'higher' : a > b ? 'lower' : 'equal'
+                },
+                { 
+                    label: '总评分', 
+                    key: 'totalRating',
+                    compare: (a, b) => a > b ? 'higher' : a < b ? 'lower' : 'equal'
+                },
+                { 
+                    label: '平均分', 
+                    key: 'meanRating',
+                    compare: (a, b) => a > b ? 'higher' : a < b ? 'lower' : 'equal'
+                },
+                { 
+                    label: '页面数', 
+                    key: 'pageCount',
+                    compare: (a, b) => a > b ? 'higher' : a < b ? 'lower' : 'equal'
+                }
+            ];
+            
+            statsToCompare.forEach(stat => {
+                const aVal = userA.statistics[stat.key];
+                const bVal = userB.statistics[stat.key];
+                const aClass = stat.compare(aVal, bVal);
+                const bClass = aClass === 'higher' ? 'lower' : aClass === 'lower' ? 'higher' : 'equal';
+                
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'stat-item';
+                itemDiv.innerHTML = `
+                    <div class="label-column">${stat.label}</div>
+                    <div class="value-box ${aClass}">${stat.key === 'rank' ? '#' : ''}${aVal}</div>
+                    <div class="value-box ${bClass}">${stat.key === 'rank' ? '#' : ''}${bVal}</div>
+                `;
+                statsContainer.appendChild(itemDiv);
+            });
+        }
+        
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('stats').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
